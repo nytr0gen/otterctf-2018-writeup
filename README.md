@@ -31,11 +31,11 @@ xxd otr/00284fd21810fdc4bb3e3b1440e85d8e.otr | head -n 20
 
 ![Diagram Legend](writeup/diagram_legend.png "Legend")
 
-Section Name: alphanumeric with `\x00` padding
-Data Length: little endian format. `e8020000` => `0xe8 + 0x02 * 0x100 = 744`
-CRC32: actually this had two formats. `686b7560 01000000`
-Uppercase flag: i named it header in `parse.py`.
-data: base64 for all sections except for `OTHER`. used the magical `if`
+- Section Name: alphanumeric with `\x00` padding
+- Data Length: little endian format. `e8020000` => `0xe8 + 0x02 * 0x100 = 744`
+- CRC32: actually this had two formats. `686b7560 01000000` and `686b7560 00000000`. `crc32_type1 == -zlib.crc32(data) and crc32_type0 == 0x10000000 - zlib.crc32(data)`
+- Uppercase flag: i named it header in `parse.py`.
+- data: base64 for all sections except for `OTHER`. used the magical `if`
 
 we had this section for otr7
 ```
@@ -55,8 +55,9 @@ wh3r3_is_my_plum8u5
 Wh3r3_Is_My_PluM8u5
 ```
 
-tadaa. uppercase flag decryptor
+tadaa. uppercase flag decryptor. ok general overview is over.
 
+to solve this task, i actually wasn't able to decode the format (yet). but i understood how the section name was formed. task description said " look for lutra in leet". so in this case it would be "lutra\x00\x00\x00". 3 null bytes padding. used a hamming distance to check (maybe it still has u or r). also checked if it printable and that the length should be > 0. found it quickly enough by analyzing the found names.
 
 ```bash
 $ python2 solve1.py
@@ -89,8 +90,12 @@ Rick hid his drive path in one of the sections - we got some intel and found out
 format: CTF{flag}
 ```
 
+NO WAY IT WAS SOLVED WITH THAT BASH SCRIPT BELOW. well yes. and it helped me to understand the format better. here is where i got the idea that `len(uppercase_flag) == len(data)/8` and after a bit i understood how to decrypt it. by just watching the logs form. lots of logs on this one :))
+
+also if you want to see a failed try, check the `main.py`. i first thought the drive path would be in the data segment. no way it would be in the `uppercase_flag`.
+
 ```bash
-$ for v in `grep -r 'N\:' otr | awk '{print $3}'`; do
+for v in `grep -r 'N\:' otr | awk '{print $3}'`; do
   echo $v
   xxd $v | grep -C10  'N:'
   echo
