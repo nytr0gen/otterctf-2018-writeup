@@ -1,0 +1,135 @@
+from pwn import *
+from zlib import crc32
+import base64
+import md5
+
+MAGIC_HEADER = "\x30\x74\x74\x33\x72\x1a"
+
+def otter_crc32(data):
+    return (~crc32(data)) + 1
+
+def md5sum(data):
+    return md5.new(data).hexdigest()
+
+def str_to_hex(s):
+    s = list(s)
+    s = map(lambda v: '\\x%02x' % ord(v), s)
+    return ''.join(s)
+
+re_b64 = re.compile('^[a-zA-Z0-9/+=]+$')
+def is_b64(s):
+    return re_b64.match(s) is not None
+
+def parse_section(data):
+    i = 0
+    info = {}
+
+    log.info('')
+    log.info('========')
+    info['section_name'] = data[i:i+8]; i += 8
+    log.info('Section name: %s' % info['section_name'])
+
+    info['data_length'] = u32(data[i:i+4]); i += 4
+
+    info['crc32_data'] = u32(data[i:i+4]); i += 4
+    info['crc32_flag'] = u32(data[i:i+4]); i += 4
+    log.info('crc32 data: %08x' % info['crc32_data'])
+    log.info('crc32 flag: %08x' % info['crc32_flag'])
+
+    # check crc32
+
+    info['uppercase_flag'] = (ord(data[i]) & 0x80) == 0x80
+    log.info('Uppercase flag: %d' % info['uppercase_flag'])
+
+    data_len = info['data_length']
+    if info['crc32_flag'] == 1:
+        for j in range(i+data_len+1, len(data)):
+            if otter_crc32(data[i:j]) == info['crc32_data']:
+                data_len = j - i
+                break
+    else:
+        for j in range(i+data_len+1, len(data)):
+            if data[j-1] == '\x00' and data[j-1] != data[j]:
+                data_len = j - i
+                break
+
+    log.info('Data Length: %d' % info['data_length'])
+    log.info('Actual Data Length: %d' % data_len)
+    # skip = 149
+    # skip = 0
+    # while not is_b64(data[i+skip:i+skip+data_len]):
+    #     skip += 1
+    # skip = 0
+    # while (ord(data[i+skip]) & 0x80) == 0x80:
+    #     skip += 1
+    #
+    # i += skip
+    # log.info('Skip: %d' % skip)
+    # log.info(data[i:i+800])
+
+    data_b64 = data[i:i+data_len]; i += data_len
+
+    log.info('crc32 of data: %08x' % otter_crc32(data_b64))
+
+
+    # print(repr(data_b64[0:100]))
+    data_b64 = list(data_b64)
+    data_b64[0] = chr(ord(data_b64[0]) & 0x7f)
+    data_b64 = ''.join(data_b64)
+    info['data'] = data_b64
+    info['length'] = i
+    log.info('========')
+
+    return info
+
+
+def parse(data, name, mtime):
+    # check mtime
+    info = {}
+    i = 0
+
+    # md5(data) == filename
+    info['name'] = name
+    info['md5_match'] = name == md5sum(data)
+    log.info('md5 match: %d' % info['md5_match'])
+    log.info('Length: %d' % len(data))
+
+    info['magic'] = data[i:i+len(MAGIC_HEADER)]; i += len(MAGIC_HEADER)
+    info['magic_valid'] = MAGIC_HEADER == info['magic']
+    log.info('Magic: %s' % str_to_hex(info['magic']))
+    log.info('Magic valid: %d' % info['magic_valid'])
+
+    info['num_of_sections'] = u32(data[i:i+4]); i += 4
+    log.info('Number of sections: %d' % info['num_of_sections'])
+
+    info['other_section_offset'] = u32(data[i:i+4]); i += 4
+    log.info('Raw offset to the OTHER section containing the file description: %d' % info['other_section_offset'])
+
+    # log.info((data[info['other_section_offset']:info['other_section_offset']+100]))
+
+    info['creation_date'] = u32(data[i:i+4]); i += 4
+    log.info('Creation date: %d' % info['creation_date'])
+    info['creation_date_diff'] = abs(info['creation_date'] - mtime)
+    log.info('Creation date diff: %d' % info['creation_date_diff'])
+
+
+    info['other_section'] = parse_section(data[info['other_section_offset']:])
+
+
+    return info
+
+    k = 0
+    info['sections'] = []
+    while i < len(data):
+        log.info('')
+        log.info('Section %d' % k)
+        section = parse_section(data[i:])
+        i += section['length']
+
+        info['sections'].append(section)
+        k += 1
+
+    # are there more sections?
+    info['actual_num_of_sections'] = len(info['sections'])
+
+    return info
